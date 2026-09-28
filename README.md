@@ -2,6 +2,13 @@
 
 A professional Streamlit application for scanning and analyzing receipts using Claude 4.5 AI.
 
+## Screenshots
+
+<!-- Add screenshots to docs/screenshots/ and uncomment:
+![Upload and scan](docs/screenshots/upload.png)
+![Spending analytics](docs/screenshots/analytics.png)
+-->
+
 ## Features
 
 ✨ **Key Features:**
