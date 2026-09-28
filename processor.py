@@ -961,7 +961,7 @@ def create_excel_download(df: pd.DataFrame) -> bytes:
                 "bold": True,
                 "text_wrap": True,
                 "valign": "top",
-                "fg_color": "#4CAF50",
+                "fg_color": "#0E7490",
                 "font_color": "white",
                 "border": 1,
             }
