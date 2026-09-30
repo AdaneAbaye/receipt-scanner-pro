@@ -39,7 +39,8 @@ def _row(i, **extra):
     return row
 
 
-@unittest.skipIf(AppTest is None, "streamlit is not installed")
+# In CI (GitHub sets CI=true) these tests must run, never silently skip.
+@unittest.skipIf(AppTest is None and not os.environ.get("CI"), "streamlit is not installed")
 class TestApp(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
