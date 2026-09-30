@@ -13,6 +13,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -30,6 +31,8 @@ from anthropic import Anthropic
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ValidationError, field_validator
 from rapidfuzz import fuzz
+
+logger = logging.getLogger(__name__)
 
 MODEL_ID = "claude-sonnet-4-5-20250929"
 
@@ -655,6 +658,20 @@ def _result(file_name: str, status: str, message: str, **extra) -> dict:
     return {"file_name": file_name, "_status": status, "_message": message, **extra}
 
 
+def _friendly_api_error(exc: Exception) -> str:
+    """Short Hebrew message for a failed API call, without raw error text."""
+    msg = f"{type(exc).__name__} {exc}".lower()
+    if "authentication" in msg or "401" in msg or "api key" in msg or "api_key" in msg:
+        return "מפתח ה-API נדחה. בדקו את ANTHROPIC_API_KEY בקובץ secrets.toml."
+    if "credit" in msg or "billing" in msg:
+        return "נגמרה היתרה בחשבון ה-API."
+    if "ratelimit" in msg or "429" in msg or "overloaded" in msg or "529" in msg:
+        return "שירות ה-AI עמוס כרגע. נסו שוב בעוד דקה."
+    if "connection" in msg or "timeout" in msg:
+        return "אין חיבור לשירות ה-AI. בדקו את החיבור לאינטרנט."
+    return "הניתוח נכשל. נסו שוב, ואם זה חוזר צלמו את הקבלה מחדש."
+
+
 def analyze_receipt_with_claude(api_key, file_bytes, file_name, exchange_rates=None, client=None) -> dict:
     """
     Extract, validate and store one receipt.
@@ -680,8 +697,9 @@ def analyze_receipt_with_claude(api_key, file_bytes, file_name, exchange_rates=N
         )
         text = "".join(getattr(block, "text", "") for block in message.content)
         data = extract_json_object(text)
-    except Exception as e:  # network, API or unreadable reply
-        return _result(file_name, STATUS_ERROR, f"הניתוח נכשל ({type(e).__name__}): {str(e)[:200]}")
+    except Exception as e:  # network, API or unreadable reply: details go to the log, not the screen
+        logger.warning("Analysis of %s failed: %s: %s", file_name, type(e).__name__, str(e)[:500])
+        return _result(file_name, STATUS_ERROR, _friendly_api_error(e))
 
     is_valid, reason, user_message = is_valid_receipt(data)
     if not is_valid:
@@ -796,7 +814,8 @@ def create_excel_download(rows: List[dict]) -> bytes:
     real dates, number formats, a VAT-reclaimable column and a totals row.
     """
     output = BytesIO()
-    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    # Text from receipts and file names is never turned into formulas (spreadsheet formula injection).
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True, "strings_to_formulas": False})
     sheet = workbook.add_worksheet("קבלות")
     sheet.right_to_left()
 
@@ -823,19 +842,19 @@ def create_excel_download(rows: List[dict]) -> bytes:
         try:
             sheet.write_datetime(i, 0, dt.datetime.combine(parse_receipt_date(r.get("date")), dt.time()), date_fmt)
         except ValueError:
-            sheet.write(i, 0, str(r.get("date") or ""))
-        sheet.write(i, 1, r.get("vendor_name") or "")
+            sheet.write_string(i, 0, str(r.get("date") or ""))
+        sheet.write_string(i, 1, str(r.get("vendor_name") or ""))
         sheet.write_string(i, 2, str(r.get("business_id") or ""))
-        sheet.write(i, 3, DOC_TYPE_LABELS.get(normalize_document_type(r.get("document_type")), "מסמך"))
+        sheet.write_string(i, 3, DOC_TYPE_LABELS.get(normalize_document_type(r.get("document_type")), "מסמך"))
         sheet.write_string(i, 4, str(r.get("document_number") or ""))
-        sheet.write(i, 5, r.get("currency") or "")
+        sheet.write_string(i, 5, str(r.get("currency") or ""))
         sheet.write_number(i, 6, round(total - vat, 2), money)
         sheet.write_number(i, 7, vat, money)
         sheet.write_number(i, 8, total, money)
         sheet.write_number(i, 9, float(r.get("total_ils") or 0.0), money)
         sheet.write_number(i, 10, float(vat_ils), money)
         sheet.write_number(i, 11, float(vat_ils) if is_vat_reclaimable(r) else 0.0, money)
-        sheet.write(i, 12, r.get("file_name") or "")
+        sheet.write_string(i, 12, str(r.get("file_name") or ""))
 
     last = len(rows)
     if last:

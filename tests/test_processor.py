@@ -316,6 +316,23 @@ class TestExcel(unittest.TestCase):
         self.assertIn("חשבונית מס", strings)
         self.assertLess(strings.index("CloudHost"), strings.index("משרדית"))  # sorted by date
 
+    def test_text_from_receipts_never_becomes_a_formula(self):
+        evil = '=HYPERLINK("http://evil.example","click")'
+        rows = [{"date": "2026-09-09", "vendor_name": evil, "business_id": "1", "document_type": "receipt",
+                 "currency": "ILS", "total_amount": 10, "vat": 0, "total_ils": 10, "file_name": "=1+1.jpg"}]
+        with zipfile.ZipFile(BytesIO(P.create_excel_download(rows))) as z:
+            sheet = z.read("xl/worksheets/sheet1.xml").decode()
+        self.assertNotIn("HYPERLINK", sheet)  # stored as a shared string, not a <f> formula
+        self.assertNotIn("<f>1+1</f>", sheet)
+
+
+class TestErrors(unittest.TestCase):
+    def test_api_errors_are_friendly(self):
+        msg = P._friendly_api_error(RuntimeError("Error code: 401 authentication_error invalid x-api-key"))
+        self.assertIn("ANTHROPIC_API_KEY", msg)
+        self.assertNotIn("x-api-key", msg)
+        self.assertNotIn("boom", P._friendly_api_error(ValueError("boom secret details")))
+
 
 if __name__ == "__main__":
     os.environ.setdefault("RECEIPTS_DB_PATH", os.path.join(tempfile.gettempdir(), "rs-test.db"))

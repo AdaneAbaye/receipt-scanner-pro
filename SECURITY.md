@@ -31,4 +31,6 @@ The app has **no login**, and everyone who opens it shares one database and your
 - **Duplicate detection**: an exact re-upload is detected by a SHA-256 hash of the file, before any API call. The same document from another photo is detected by its vendor, date, amount, currency and document number.
 - **Validation**: the model's output is validated with Pydantic before it is stored. Every query uses SQL parameters.
 - **Untrusted AI output**: everything the model returns is HTML-escaped before it is shown in the UI.
+- **Spreadsheet formula injection**: text from receipts and file names is written to Excel as plain text (`strings_to_formulas` is off), so `=HYPERLINK(...)` in a vendor name stays harmless text.
+- **Local only**: `.streamlit/config.toml` binds the server to `localhost`, caps uploads at 20 MB and hides Python error details from the browser. API errors are logged; the screen shows a short message only.
 - **Prompt injection**: the extraction prompt tells the model to treat the document as data, not instructions. You still review every document before it goes into the report.

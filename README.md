@@ -67,6 +67,9 @@ The app opens at `http://localhost:8501`. To use it from your phone, open the sa
 
 - Receipt images are sent to the Anthropic API for extraction. Only the extracted fields are stored, locally, in `receipts.db`.
 - The app is designed for **one user on their own computer**. Do not deploy it publicly as-is: every visitor would share the same database and your API key.
+- `.streamlit/config.toml` binds the app to `localhost`, so other devices on the same network cannot open it, and hides Python error details from the browser.
+- Text from receipts is written to Excel as plain text, never as a formula, so a crafted receipt cannot plant a link or formula in the accountant's file.
+- The database and exported reports (`*.db`, `*.xlsx`) are gitignored.
 
 ## Development
 
