@@ -1,109 +1,37 @@
-import html
+"""Receipt Scanner Pro - Streamlit UI for freelancers who send receipts to their accountant."""
 
-import streamlit as st
-import pandas as pd
-import plotly.express as px
+import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
-# Processing logic (modular)
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
 from processor import (
-    fetch_live_exchange_rates,
-    convert_to_ils,
-    is_valid_receipt,
+    DOC_TYPE_LABELS,
+    STATUS_DUPLICATE,
+    STATUS_ERROR,
+    STATUS_POSSIBLE_DUPLICATE,
+    STATUS_REJECTED,
+    STATUS_SAVED,
     analyze_receipt_with_claude,
+    clear_all_receipts,
     convert_pdf_to_image,
     create_excel_download,
+    fetch_live_exchange_rates,
     get_all_receipts,
-    clear_all_receipts,
+    get_anthropic_client,
+    is_vat_reclaimable,
+    normalize_currency,
+    normalize_document_type,
+    parse_amount,
+    parse_receipt_date,
+    set_receipt_approved,
 )
 
-# Multilingual UI strings (internal preparation; Hebrew preserved for end-user experience)
-UI_STRINGS = {
-    'en': {
-        'app_title': '🧾 Receipt Scanner Pro',
-        'page_title': 'Receipt Scanner Pro',
-        'api_config': '🔑 API Configuration',
-        'api_key_label': 'Anthropic API Key',
-        'api_key_help': 'Enter your Anthropic API key to use Claude AI',
-        'exchange_rates': '💱 Exchange Rates',
-        'live_rates': '✅ Live rates (updated hourly)',
-        'fallback_rates': '⚠️ Using fallback rates (API unavailable)',
-        'current_rate': 'Current Rate',
-        'view_all_rates': '📊 View all rates',
-        'rates_cached': 'Rates cached for 1 hour',
-        'instructions': '📖 Instructions',
-        'clear_data': '🗑️ Clear All Data',
-        'upload_receipts': '📤 Upload Receipts',
-        'analyze_receipts': '🔍 Analyze Receipts',
-        'extracted_data': '📊 Extracted Receipt Data',
-        'download_excel': '📥 Download Excel Report',
-        'summary': '📈 Summary',
-        'total_receipts': 'Total Receipts',
-        'total_amount_ils': 'Total Amount (ILS)',
-        'unique_vendors': 'Unique Vendors',
-        'total_vat': 'Total Recoverable VAT',
-        'visual_analytics': '📊 Visual Analytics (All amounts in ILS)',
-        'spending_by_vendor': '💰 Spending by Vendor (ILS)',
-        'amount_by_vendor': '📊 Amount by Vendor (ILS)',
-        'vat_analysis': '💳 VAT/Tax Analysis (ILS)',
-        'duplicate_warning': '⚠️ Duplicate receipt detected',
-        'success_processed': '✅ Successfully processed: {}',
-        'failed_processed': '❌ Failed to process: {}',
-        'data_cleared': '✅ All data cleared!',
-    },
-    'he': {
-        'app_title': '🧾 סורק קבלות מקצועי',
-        'page_title': 'סורק קבלות מקצועי',
-        'api_config': '🔑 הגדרות API',
-        'api_key_label': 'מפתח API של Anthropic',
-        'api_key_help': 'הזן את מפתח ה-API שלך לשימוש ב-Claude AI',
-        'exchange_rates': '💱 שערי המרה',
-        'live_rates': '✅ שערים חיים (מתעדכן כל שעה)',
-        'fallback_rates': '⚠️ שימוש בשערים קבועים (API לא זמין)',
-        'current_rate': 'שער נוכחי',
-        'view_all_rates': '📊 צפה בכל השערים',
-        'rates_cached': 'שערים שמורים למשך שעה',
-        'instructions': '📖 הוראות שימוש',
-        'clear_data': '🗑️ נקה את כל הנתונים',
-        'upload_receipts': '📤 העלאת קבלות',
-        'analyze_receipts': '🔍 נתח קבלות',
-        'extracted_data': '📊 נתוני קבלות שחולצו',
-        'download_excel': '📥 הורד דוח Excel',
-        'summary': '📈 סיכום',
-        'total_receipts': 'סה"כ קבלות',
-        'total_amount_ils': 'סה"כ סכום (שקלים)',
-        'unique_vendors': 'ספקים ייחודיים',
-        'total_vat': 'סה"כ מע"מ להחזר',
-        'visual_analytics': '📊 ניתוח ויזואלי (כל הסכומים בשקלים)',
-        'spending_by_vendor': '💰 הוצאות לפי ספק (שקלים)',
-        'amount_by_vendor': '📊 סכום לפי ספק (שקלים)',
-        'vat_analysis': '💳 ניתוח מע"מ (שקלים)',
-        'duplicate_warning': '⚠️ קבלה כפולה התגלתה',
-        'success_processed': '✅ עובד בהצלחה: {}',
-        'failed_processed': '❌ נכשל בעיבוד: {}',
-        'data_cleared': '✅ כל הנתונים נוקו!',
-    }
-}
-
-# Current display language ('en' or 'he'); Hebrew UI strings preserved in UI_STRINGS
-CURRENT_LANG = 'he'
-
-def get_text(key: str) -> str:
-    """
-    Return UI text for the given key in the current language.
-
-    Args:
-        key: Key to look up in UI_STRINGS (e.g. 'app_title', 'upload_receipts').
-
-    Returns:
-        str: Localized string for the key, or the key itself if not found.
-    """
-    return UI_STRINGS[CURRENT_LANG].get(key, key)
-
-# Page configuration
 st.set_page_config(
-    page_title=get_text('page_title'),
+    page_title="Receipt Scanner Pro",
     page_icon="🧾",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -118,14 +46,6 @@ FIELD_COLORS = {
     "date": "#BE185D",
     "vat": "#B45309",
     "total": "#15803D",
-}
-DOC_TYPE_LABELS = {
-    "receipt": "קבלה",
-    "invoice": "חשבונית",
-    "tax_invoice": "חשבונית מס",
-    "tax_invoice_receipt": "חשבונית מס קבלה",
-    "credit_note": "חשבונית זיכוי",
-    "bill": "חשבון",
 }
 CHART_COLORS = ["#0E7490", "#1D4ED8", "#B45309", "#BE185D", "#15803D", "#6D28D9", "#64748B"]
 
@@ -207,6 +127,18 @@ st.markdown(f"""
     .rs-empty {{padding: 18px 20px; border-radius: 14px; background: #F9FAFB; color: #4B5563; font-size: 15px;}}
     .rs-muted {{font-size: 12.5px; color: #6B7280;}}
 
+    .rs-kpi .s {{font-size: 12.5px; color: #6B7280;}}
+    .rs-kpi.hl .s {{color: #CFFAFE;}}
+    .rs-warn {{margin: 12px 0 0; padding: 10px 14px; border-radius: 10px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; font-size: 14px;}}
+    .rs-results {{margin: 14px 0 6px; padding: 14px 18px; border-radius: 14px; border: 1px solid #E5E7EB; background: #F9FAFB;}}
+    .rs-results-title {{font-size: 14px; font-weight: 700; margin-bottom: 8px;}}
+    .rs-results ul {{margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;}}
+    .rs-res {{display: flex; align-items: baseline; gap: 8px; font-size: 14px; color: #374151;}}
+    .rs-res .i {{width: 20px; height: 20px; border-radius: 10px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #FFFFFF; background: #9CA3AF;}}
+    .rs-res.saved .i {{background: #15803D;}}
+    .rs-res.possible_duplicate .i {{background: #B45309;}}
+    .rs-res.rejected .i, .rs-res.error .i {{background: #B91C1C;}}
+
     /* Phones: most receipts are photographed and reviewed on mobile */
     @media (max-width: 640px) {{
         .block-container {{padding: 1rem 1rem 2rem;}}
@@ -232,17 +164,23 @@ def _esc(value) -> str:
 
 def _money(value, currency: str = "ILS") -> str:
     """Format an amount with its currency symbol."""
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
+    amount = parse_amount(value)
+    if amount is None:
         return "—"
     symbol = {"ILS": "₪", "USD": "$", "EUR": "€", "GBP": "£"}.get(str(currency).upper(), "")
     text = f"{amount:,.2f}"
     return f"{symbol}{text}" if symbol else f"{text} {_esc(currency)}"
 
 
-def _receipt_key(r: dict) -> str:
-    return f"{r.get('file_name')}|{r.get('date')}|{r.get('total_amount')}"
+def _vat_ils(r: dict) -> float:
+    """VAT in shekels; rows saved before vat_ils existed fall back to their ILS VAT."""
+    if r.get("vat_ils") is not None:
+        return float(r["vat_ils"])
+    return float(parse_amount(r.get("vat")) or 0.0) if normalize_currency(r.get("currency")) == "ILS" else 0.0
+
+
+def _doc_label(r: dict) -> str:
+    return DOC_TYPE_LABELS[normalize_document_type(r.get("document_type"))]
 
 
 def render_header(step: int) -> None:
@@ -275,24 +213,51 @@ def render_header(step: int) -> None:
     )
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def _pdf_preview(data: bytes):
+    image_bytes, _ = convert_pdf_to_image(data)
+    return image_bytes
+
+
 def preview_image(file_name: str, files_by_name: dict):
-    """Image bytes to show for a receipt (first page of a PDF), or None if unavailable."""
+    """Image bytes to show for a receipt (first pages of a PDF), or None if unavailable."""
     data = files_by_name.get(file_name)
     if data is None:
         return None
     if file_name.lower().endswith(".pdf"):
-        image_bytes, _err = convert_pdf_to_image(data)
-        return image_bytes
+        return _pdf_preview(data)
     return data
+
+
+def render_results() -> None:
+    """What happened to each file in the last analysis (kept across the rerun)."""
+    results = st.session_state.get("last_results")
+    if not results:
+        return
+    icons = {STATUS_SAVED: "✓", STATUS_POSSIBLE_DUPLICATE: "!", STATUS_DUPLICATE: "=", STATUS_REJECTED: "×", STATUS_ERROR: "×"}
+    items = "".join(
+        f'<li class="rs-res {r["_status"]}"><span class="i">{icons.get(r["_status"], "·")}</span>'
+        f'<b>{_esc(r["file_name"])}</b><span>{_esc(r["_message"])}</span></li>'
+        for r in results
+    )
+    saved = sum(r["_status"] in (STATUS_SAVED, STATUS_POSSIBLE_DUPLICATE) for r in results)
+    st.markdown(
+        f'<div class="rs-results"><div class="rs-results-title">תוצאות הניתוח · {saved} מתוך {len(results)} נקלטו</div>'
+        f'<ul>{items}</ul></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("סגירה", key="close_results"):
+        st.session_state.last_results = []
+        st.rerun()
 
 
 def render_review(receipts: list, files_by_name: dict) -> None:
     """Side-by-side review: the original receipt next to what the AI extracted."""
     total = len(receipts)
-    approved = st.session_state.setdefault("approved", set())
     idx = min(st.session_state.get("review_idx", 0), total - 1)
     r = receipts[idx]
     currency = r.get("currency") or "ILS"
+    reclaimable = is_vat_reclaimable(r)
 
     col_stage, col_fields = st.columns([1, 1.15], gap="large")
 
@@ -309,31 +274,36 @@ def render_review(receipts: list, files_by_name: dict) -> None:
             st.markdown(f'<div class="rs-muted">{_esc(r.get("file_name"))}</div>', unsafe_allow_html=True)
 
     with col_fields:
-        raw_type = str(r.get("document_type") or "receipt").lower()
-        doc_type = DOC_TYPE_LABELS.get(raw_type, raw_type.replace("_", " "))
+        warning = (
+            '<div class="rs-warn">ייתכן שזו כפילות: יש כבר מסמך עם אותו ספק, תאריך וסכום.</div>'
+            if r.get("possible_duplicate")
+            else ""
+        )
         st.markdown(
             f"""
             <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px;">
               <div>
-                <div class="rs-kicker">קבלה {idx + 1} מתוך {total}</div>
+                <div class="rs-kicker">מסמך {idx + 1} מתוך {total}</div>
                 <div class="rs-title">בדקו את מה שה-AI חילץ</div>
               </div>
-              <span class="rs-badge">{_esc(doc_type)}</span>
+              <span class="rs-badge">{_esc(_doc_label(r))}</span>
             </div>
+            {warning}
             <div class="rs-fields">
               <div class="rs-field"><span class="lbl"><span class="dot" style="background:{FIELD_COLORS['vendor']}"></span>ספק</span>
                 <div class="val">{_esc(r.get('vendor_name'))}</div></div>
               <div class="rs-field"><span class="lbl"><span class="dot" style="background:{FIELD_COLORS['date']}"></span>תאריך</span>
-                <div class="val">{_esc(r.get('date'))}</div></div>
+                <div class="val">{_esc(_display_date(r.get('date')))}</div></div>
               <div class="rs-field"><span class="lbl"><span class="dot" style="background:{FIELD_COLORS['vat']}"></span>מע"מ</span>
                 <div class="val">{_money(r.get('vat'), currency)}</div></div>
               <div class="rs-field"><span class="lbl"><span class="dot" style="background:{FIELD_COLORS['total']}"></span>סה"כ</span>
                 <div class="val" style="font-weight:700">{_money(r.get('total_amount'), currency)}</div></div>
             </div>
             <div class="rs-meta">
-              <span>מטבע: <b>{_esc(currency)}</b></span><span class="sep">|</span>
               <span>בשקלים: <b>{_money(r.get('total_ils'))}</b></span><span class="sep">|</span>
-              <span>ע.מ / ח.פ: <b>{_esc(r.get('business_id') or '—')}</b></span>
+              <span>ע.מ / ח.פ: <b>{_esc(r.get('business_id') or '—')}</b></span><span class="sep">|</span>
+              <span>מספר מסמך: <b>{_esc(r.get('document_number') or '—')}</b></span><span class="sep">|</span>
+              <span>מע"מ לקיזוז: <b>{'כן' if reclaimable else 'לא'}</b></span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -341,179 +311,206 @@ def render_review(receipts: list, files_by_name: dict) -> None:
 
         b1, b2 = st.columns([3, 1])
         with b1:
-            is_approved = _receipt_key(r) in approved
-            label = "אושרה ✓ · מעבר לבאה" if is_approved else "אישור ומעבר לבאה"
-            if st.button(label, type="primary", width="stretch", key=f"approve_{idx}"):
-                approved.add(_receipt_key(r))
+            label = "אושר ✓ · מעבר לבא" if r.get("approved") else "אישור ומעבר לבא"
+            if st.button(label, type="primary", width="stretch", key=f"approve_{r['id']}"):
+                if not r.get("approved"):
+                    set_receipt_approved(r["id"], True)
                 st.session_state.review_idx = (idx + 1) % total
                 st.rerun()
         with b2:
-            if st.button("דילוג", width="stretch", key=f"skip_{idx}"):
+            if st.button("דילוג", width="stretch", key=f"skip_{r['id']}"):
                 st.session_state.review_idx = (idx + 1) % total
                 st.rerun()
 
-        # Queue strip: up to 5 receipts around the current one, then "+N more"
+        # Queue strip: up to 5 documents around the current one, then "+N more"
         start = max(0, min(idx - 2, total - 5))
         window = receipts[start:start + 5]
         cells = []
         for j, q in enumerate(window, start=start):
-            if j == idx:
-                cls = "current"
-            elif _receipt_key(q) in approved:
-                cls = "done"
-            else:
-                cls = ""
-            mark = "✓ " if _receipt_key(q) in approved else ""
+            cls = "current" if j == idx else "done" if q.get("approved") else ""
+            mark = "✓ " if q.get("approved") else ""
             cells.append(
                 f'<div class="rs-q {cls}"><span class="v">{mark}{_esc(q.get("vendor_name"))}</span>'
                 f'<span class="t">{_money(q.get("total_amount"), q.get("currency") or "ILS")}</span></div>'
             )
         remaining = total - (start + len(window))
         if remaining > 0:
-            cells.append(f'<div class="rs-q"><span class="v">+{remaining} נוספות</span><span class="t">ממתינות</span></div>')
+            cells.append(f'<div class="rs-q"><span class="v">+{remaining} נוספים</span><span class="t">ממתינים</span></div>')
+        approved_count = sum(1 for x in receipts if x.get("approved"))
         st.markdown(
-            f'<div class="rs-queue-title">תור בדיקה · {len(approved & {_receipt_key(x) for x in receipts})} מתוך {total} אושרו</div>'
+            f'<div class="rs-queue-title">תור בדיקה · {approved_count} מתוך {total} אושרו</div>'
             f'<div class="rs-queue">{"".join(cells)}</div>',
             unsafe_allow_html=True,
         )
 
 
-def render_summary(receipt_data: list, exchange_rates: dict) -> None:
-    """KPIs, full table with Excel export, and spending charts (all in ILS)."""
-    df = pd.DataFrame(receipt_data)
-    column_order = ['file_name', 'vendor_name', 'date', 'total_amount', 'vat', 'currency', 'total_ils']
-    df = df[[c for c in column_order if c in df.columns]]
-    df = df.rename(columns={
-        'file_name': 'קובץ',
-        'vendor_name': 'ספק',
-        'date': 'תאריך',
-        'total_amount': 'סכום',
-        'vat': 'מע"מ',
-        'currency': 'מטבע',
-        'total_ils': 'סכום בש"ח',
-    })
+def _display_date(value) -> str:
+    try:
+        return parse_receipt_date(value).strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value or "")
 
-    total_receipts = len(df)
-    total_ils = pd.to_numeric(df.get('סכום בש"ח'), errors='coerce').fillna(0).sum() if total_receipts else 0
-    vat_numeric = pd.to_numeric(df['מע"מ'].astype(str).str.replace(',', '', regex=False), errors='coerce').fillna(0)
-    vat_ils = [convert_to_ils(v, c, exchange_rates) for v, c in zip(vat_numeric, df['מטבע'])]
-    total_vat = float(sum(vat_ils))
-    avg_receipt = total_ils / total_receipts if total_receipts else 0
+
+def render_summary(receipts: list, rates_are_live: bool) -> None:
+    """KPIs, the full table, the Excel report (approved documents) and spending charts."""
+    total_docs = len(receipts)
+    total_ils = sum(float(r.get("total_ils") or 0.0) for r in receipts)
+    vat_paid = sum(_vat_ils(r) for r in receipts)
+    vat_reclaim = sum(_vat_ils(r) for r in receipts if is_vat_reclaimable(r))
+    approved = [r for r in receipts if r.get("approved")]
+    avg = total_ils / total_docs if total_docs else 0.0
 
     st.markdown('<div class="rs-section">הדוח לרואה החשבון</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="rs-kpis">
-          <div class="rs-kpi hl"><span class="k">מע"מ ששולם</span><span class="v">₪{total_vat:,.2f}</span></div>
+          <div class="rs-kpi hl"><span class="k">מע"מ לקיזוז</span><span class="v">₪{vat_reclaim:,.2f}</span>
+            <span class="s">מתוך ₪{vat_paid:,.2f} מע"מ ששולם</span></div>
           <div class="rs-kpi"><span class="k">סה"כ הוצאות</span><span class="v">₪{total_ils:,.2f}</span></div>
-          <div class="rs-kpi"><span class="k">מסמכים</span><span class="v">{total_receipts}</span></div>
-          <div class="rs-kpi"><span class="k">ממוצע למסמך</span><span class="v">₪{avg_receipt:,.2f}</span></div>
+          <div class="rs-kpi"><span class="k">מסמכים</span><span class="v">{total_docs}</span>
+            <span class="s">{len(approved)} אושרו</span></div>
+          <div class="rs-kpi"><span class="k">ממוצע למסמך</span><span class="v">₪{avg:,.2f}</span></div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    if not rates_are_live:
+        st.markdown(
+            '<div class="rs-muted" style="margin-top:8px">שירות שערי המטבע לא זמין כרגע, ולכן הומרו סכומים זרים לפי שער משוער.</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.markdown('<div class="rs-section">כל הקבלות</div>', unsafe_allow_html=True)
-    st.dataframe(df, width='stretch', hide_index=True, height=360)
+    st.markdown('<div class="rs-section">כל המסמכים</div>', unsafe_allow_html=True)
+    table = pd.DataFrame(
+        [
+            {
+                "סטטוס": "✓ אושר" if r.get("approved") else "ממתין",
+                "תאריך": _display_date(r.get("date")),
+                "ספק": r.get("vendor_name"),
+                "סוג": _doc_label(r),
+                "סכום": parse_amount(r.get("total_amount")),
+                'מע"מ': parse_amount(r.get("vat")) or 0.0,
+                "מטבע": r.get("currency"),
+                'סכום בש"ח': float(r.get("total_ils") or 0.0),
+                "לקיזוז": "כן" if is_vat_reclaimable(r) else "לא",
+                "קובץ": r.get("file_name"),
+            }
+            for r in receipts
+        ]
+    )
+    st.dataframe(
+        table,
+        width="stretch",
+        hide_index=True,
+        height=min(420, 38 + 35 * len(table)),
+        column_config={
+            "סכום": st.column_config.NumberColumn(format="%.2f"),
+            'מע"מ': st.column_config.NumberColumn(format="%.2f"),
+            'סכום בש"ח': st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
 
-    c1, c2, _ = st.columns([1, 1, 2])
+    c1, c2, _ = st.columns([1.2, 1, 1.8])
     with c1:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         st.download_button(
-            label='הורדת הדוח לרו"ח (Excel)',
-            data=create_excel_download(df),
+            label=f'הורדת הדוח לרו"ח (Excel) · {len(approved)} מסמכים',
+            data=create_excel_download(approved) if approved else b"",
             file_name=f"receipts_for_accountant_{timestamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width='stretch',
+            width="stretch",
+            disabled=not approved,
         )
+        if not approved:
+            st.markdown('<div class="rs-muted">הדוח כולל רק מסמכים שאישרתם.</div>', unsafe_allow_html=True)
     with c2:
-        if st.button("ניקוי כל הנתונים", width='stretch'):
-            deleted = clear_all_receipts()
-            st.session_state.uploader_key = st.session_state.get('uploader_key', 0) + 1
-            st.session_state.review_idx = 0
-            st.session_state.approved = set()
-            st.toast(f"נמחקו {deleted} קבלות")
-            st.rerun()
+        if not st.session_state.get("confirm_clear"):
+            if st.button("ניקוי כל הנתונים", width="stretch"):
+                st.session_state.confirm_clear = True
+                st.rerun()
+        else:
+            st.markdown(f'<div class="rs-warn">למחוק את כל {total_docs} המסמכים? אי אפשר לבטל.</div>', unsafe_allow_html=True)
+            y, n = st.columns(2)
+            with y:
+                if st.button("כן, למחוק", type="primary", width="stretch"):
+                    deleted = clear_all_receipts()
+                    st.session_state.uploader_key = st.session_state.get("uploader_key", 0) + 1
+                    st.session_state.review_idx = 0
+                    st.session_state.confirm_clear = False
+                    st.session_state.last_results = []
+                    st.toast(f"נמחקו {deleted} מסמכים")
+                    st.rerun()
+            with n:
+                if st.button("ביטול", width="stretch"):
+                    st.session_state.confirm_clear = False
+                    st.rerun()
 
-    viz_df = df.copy()
-    viz_df['total'] = pd.to_numeric(viz_df['סכום בש"ח'], errors='coerce')
-    viz_df = viz_df.dropna(subset=['total'])
-    viz_df = viz_df[viz_df['total'] > 0]
-    if viz_df.empty:
+    chart_df = table[table['סכום בש"ח'] > 0]
+    if chart_df.empty:
         return
-
     vendor_totals = (
-        viz_df.groupby('ספק')['total'].sum().reset_index().sort_values('total', ascending=False)
+        chart_df.groupby("ספק")['סכום בש"ח'].sum().reset_index().sort_values('סכום בש"ח', ascending=False)
     )
     st.markdown('<div class="rs-section">לאן הולך הכסף</div>', unsafe_allow_html=True)
     ch1, ch2 = st.columns(2, gap="large")
     common = dict(
-        template='plotly_white',
-        font=dict(family='Rubik, sans-serif', color='#111827', size=13),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
+        template="plotly_white",
+        font=dict(family="Rubik, sans-serif", color="#111827", size=13),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(t=10, b=10, l=10, r=10),
-        hoverlabel=dict(bgcolor='#FFFFFF', font_family='Rubik, sans-serif'),
+        hoverlabel=dict(bgcolor="#FFFFFF", font_family="Rubik, sans-serif"),
     )
     with ch1:
-        fig_pie = px.pie(vendor_totals, values='total', names='ספק', hole=0.55,
-                         color_discrete_sequence=CHART_COLORS)
+        fig_pie = px.pie(vendor_totals, values='סכום בש"ח', names="ספק", hole=0.55, color_discrete_sequence=CHART_COLORS)
         fig_pie.update_traces(
-            textposition='inside', textinfo='percent',
-            hovertemplate='%{label}<br>₪%{value:,.2f} · %{percent}<extra></extra>',
-            marker=dict(line=dict(color='#FFFFFF', width=2)),
+            textposition="inside",
+            textinfo="percent",
+            hovertemplate="%{label}<br>₪%{value:,.2f} · %{percent}<extra></extra>",
+            marker=dict(line=dict(color="#FFFFFF", width=2)),
         )
-        fig_pie.update_layout(height=380, showlegend=True, legend=dict(orientation='v', x=1.02, y=0.5), **common)
-        st.plotly_chart(fig_pie, use_container_width=True, key='pie_vendor')
+        fig_pie.update_layout(height=380, showlegend=True, legend=dict(orientation="v", x=1.02, y=0.5), **common)
+        st.plotly_chart(fig_pie, use_container_width=True, key="pie_vendor")
     with ch2:
-        fig_bar = px.bar(vendor_totals, x='ספק', y='total', color_discrete_sequence=[ACCENT])
-        fig_bar.update_traces(hovertemplate='%{x}<br>₪%{y:,.2f}<extra></extra>')
+        fig_bar = px.bar(vendor_totals, x="ספק", y='סכום בש"ח', color_discrete_sequence=[ACCENT])
+        fig_bar.update_traces(hovertemplate="%{x}<br>₪%{y:,.2f}<extra></extra>")
         fig_bar.update_layout(
-            height=380, showlegend=False, xaxis_title=None, yaxis_title='₪',
-            xaxis=dict(showgrid=False), yaxis=dict(gridcolor='#EEF0F3'), **common,
+            height=380, showlegend=False, xaxis_title=None, yaxis_title="₪",
+            xaxis=dict(showgrid=False), yaxis=dict(gridcolor="#EEF0F3"), **common,
         )
-        st.plotly_chart(fig_bar, use_container_width=True, key='bar_vendor')
+        st.plotly_chart(fig_bar, use_container_width=True, key="bar_vendor")
 
 
 def main():
     """
     Run the Streamlit receipt scanner application.
 
-    Handles file upload, AI analysis, review, validation, and Excel export.
-    API key is retrieved strictly from Streamlit secrets.
+    Upload → AI extraction → review and approve → Excel report for the accountant.
+    The API key is read only from Streamlit secrets.
     """
-    if 'uploader_key' not in st.session_state:
-        st.session_state.uploader_key = 0
+    st.session_state.setdefault("uploader_key", 0)
+    exchange_rates, rates_are_live = fetch_live_exchange_rates()
 
-    # Fetch exchange rates once at app start (silent)
-    exchange_rates, is_live = fetch_live_exchange_rates()
-
-    # SECURITY: API key MUST be retrieved strictly from st.secrets (never hardcoded or env fallback)
+    # SECURITY: the API key comes only from st.secrets (never hardcoded, never typed in the UI)
     try:
         api_key = st.secrets["ANTHROPIC_API_KEY"]
-        if not api_key or not str(api_key).strip():
-            st.error("לא נמצא מפתח API. יש להגדיר אותו בקובץ .streamlit/secrets.toml")
-            st.stop()
-    except (KeyError, FileNotFoundError):
+    except Exception:  # no secrets file, or the key is missing
+        api_key = None
+    if not api_key or not str(api_key).strip():
         st.error("לא נמצא מפתח API. יש להגדיר אותו בקובץ .streamlit/secrets.toml")
         st.stop()
 
-    receipt_data = get_all_receipts()
-    uploader_state = st.session_state.get(f"uploader_{st.session_state.uploader_key}")
-    has_files = bool(uploader_state)
-    if not has_files and not receipt_data:
-        step = 1
-    elif not receipt_data:
-        step = 2
+    receipts = get_all_receipts()
+    has_files = bool(st.session_state.get(f"uploader_{st.session_state.uploader_key}"))
+    if not receipts:
+        step = 2 if has_files else 1
     else:
-        approved_keys = st.session_state.get("approved", set())
-        all_approved = all(_receipt_key(r) in approved_keys for r in receipt_data)
-        step = 4 if all_approved else 3
+        step = 4 if all(r.get("approved") for r in receipts) else 3
     render_header(step)
 
     uploaded_files = st.file_uploader(
         "צלמו או העלו קבלות וחשבוניות (JPG, PNG, PDF)",
-        type=['jpg', 'jpeg', 'png', 'pdf'],
+        type=["jpg", "jpeg", "png", "pdf"],
         accept_multiple_files=True,
         help="בנייד אפשר לצלם ישירות מהמצלמה. אפשר להעלות כמה מסמכים בבת אחת.",
         key=f"uploader_{st.session_state.uploader_key}",
@@ -522,54 +519,31 @@ def main():
     if uploaded_files:
         _, mid, _ = st.columns([1, 2, 1])
         with mid:
-            analyze_button = st.button(f"ניתוח {len(uploaded_files)} קבצים עם AI", type="primary", width='stretch')
+            analyze = st.button(f"ניתוח {len(uploaded_files)} קבצים עם AI", type="primary", width="stretch")
 
-        if analyze_button:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            results_placeholder = st.container()
-
-            def process_one(uploaded_file):
-                """Process a single file; returns (file_name, result)."""
-                file_bytes = uploaded_file.getvalue()
-                result = analyze_receipt_with_claude(
-                    api_key, file_bytes, uploaded_file.name, exchange_rates
-                )
-                return (uploaded_file.name, result)
-
-            completed = 0
-            total = len(uploaded_files)
-
-            with ThreadPoolExecutor(max_workers=min(6, total)) as executor:
-                futures = {executor.submit(process_one, f): f.name for f in uploaded_files}
-                with results_placeholder:
-                    for future in as_completed(futures):
-                        file_name = futures[future]
-                        try:
-                            name, result = future.result()
-                            if result:
-                                is_valid, reason, user_message = is_valid_receipt(result)
-                                if is_valid:
-                                    if result.get("_duplicate", False):
-                                        st.warning(f"קבלה כפולה, לא נשמרה שוב: {name}")
-                                else:
-                                    st.error(f"הקובץ '{name}' נדחה: זה לא נראה כמו מסמך עסקי.")
-                                    with st.expander(f"פרטים על {name}"):
-                                        st.write(f"**סיבה:** {user_message}")
-                                        st.write(f"**קוד:** {reason}")
-                            else:
-                                st.error(f"הניתוח של {name} נכשל")
-                        except Exception as e:
-                            st.error(f"שגיאה בעיבוד {file_name}: {str(e)}")
-
-                        completed += 1
-                        progress_bar.progress(completed / total)
-                        status_text.text(f"עובדו {completed} מתוך {total} קבצים...")
-
-            st.session_state.review_idx = 0
+        if analyze:
+            client = get_anthropic_client(api_key)  # created on the main thread, shared by workers
+            progress = st.progress(0.0, text="מנתחים את המסמכים...")
+            files = [(f.name, f.getvalue()) for f in uploaded_files]
+            results = []
+            with ThreadPoolExecutor(max_workers=min(6, len(files))) as executor:
+                futures = [
+                    executor.submit(analyze_receipt_with_claude, api_key, data, name, exchange_rates, client)
+                    for name, data in files
+                ]
+                for done, future in enumerate(as_completed(futures), start=1):
+                    results.append(future.result())
+                    progress.progress(done / len(files), text=f"נותחו {done} מתוך {len(files)}")
+            order = {name: i for i, (name, _) in enumerate(files)}
+            st.session_state.last_results = sorted(results, key=lambda r: order.get(r["file_name"], 0))
+            st.session_state.review_idx = next(
+                (i for i, r in enumerate(get_all_receipts()) if not r.get("approved")), 0
+            )
             st.rerun()
 
-    if not receipt_data:
+    render_results()
+
+    if not receipts:
         st.markdown(
             '<div class="rs-empty" style="margin-top:12px">צלמו את הקבלות והחשבוניות של העסק, מהנייד או מהמחשב. '
             'ה-AI יחלץ ספק, תאריך, סכום ומע"מ, אתם מאשרים כל מסמך, ובסוף מורידים דוח Excel מסודר לרואה החשבון.</div>',
@@ -579,8 +553,8 @@ def main():
 
     files_by_name = {f.name: f.getvalue() for f in (uploaded_files or [])}
     st.markdown('<div style="height:18px"></div>', unsafe_allow_html=True)
-    render_review(receipt_data, files_by_name)
-    render_summary(receipt_data, exchange_rates)
+    render_review(receipts, files_by_name)
+    render_summary(receipts, rates_are_live)
 
 
 if __name__ == "__main__":

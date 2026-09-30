@@ -13,26 +13,31 @@ Photograph receipts and invoices on your phone or upload them from your computer
 
 ## How it works
 
-1. **Upload**: photograph receipts with your phone's camera or upload JPG, PNG or PDF files, several at once.
-2. **AI extraction**: each document is analyzed in parallel with Claude. The app extracts:
+1. **Upload**: photograph receipts with your phone's camera or upload JPG, PNG or PDF files, several at once. Phone photos are rotated upright and resized automatically.
+2. **AI extraction**: each document is analyzed in parallel with Claude, which extracts:
    - vendor
-   - date
+   - date (Israeli day-first dates are handled)
    - total
    - VAT (מע"מ)
    - currency
    - business ID (ע.מ / ח.פ)
-   - document type
-3. **Review**: the original image is shown next to the extracted fields. Approve each document or skip it.
-4. **Report for the accountant**: the report shows VAT paid, total expenses, a table of every document, and spending by vendor. Download it as Excel.
+   - document type (חשבונית מס, קבלה, ...)
+   - document number
 
-## Features
+   PDFs are sent as documents, so every page is read.
+3. **Review**: the original image is shown next to the extracted fields. Approve each document; your approvals are saved.
+4. **Report for the accountant**: the Excel file includes only approved documents, sorted by date, in a right-to-left sheet. It has real dates and these columns:
+   - net, VAT and gross amounts
+   - the amount in shekels
+   - VAT that can be reclaimed
+   - a totals row
 
-- **Hebrew-first, right-to-left interface** that works on desktop and mobile.
-- **Totals in shekels**: foreign-currency amounts are converted to ILS using live exchange rates, cached hourly. If the rate service is unavailable, a fixed fallback rate is used.
-- **Duplicate detection**: a SHA-256 fingerprint of vendor, date and amount stops the same receipt from being counted twice.
-- **Filters out non-business documents**, such as certificates and school documents, before they reach the report.
-- **Local storage**: the extracted data is validated with Pydantic and stored in a local SQLite database (`receipts.db`, gitignored).
-- **Multi-page PDFs**: every page is converted to an image and stitched together with PyMuPDF.
+## What makes the numbers trustworthy
+
+- **VAT to reclaim** counts only Israeli tax invoices (חשבונית מס / חשבונית מס קבלה) in shekels with a 9-digit business ID. A plain receipt or a foreign invoice doesn't count. The app also shows the total VAT paid.
+- **Currencies**: foreign amounts are converted to shekels when the document is scanned, using live rates for every currency, cached hourly. An unknown currency is flagged; it is never silently treated as shekels.
+- **Duplicates**: re-uploading the same file is caught before any API call. The same document from another photo is caught by its vendor, date, amount, currency and document number. Two documents that look the same but have no number to tell them apart are both kept, and flagged for you to check.
+- **Nothing is lost silently**: every file ends up with a visible result. It is either saved, possibly a duplicate, a duplicate, rejected (with the reason) or failed (with the error).
 
 ## Setup
 
@@ -62,6 +67,16 @@ The app opens at `http://localhost:8501`. To use it from your phone, open the sa
 
 - Receipt images are sent to the Anthropic API for extraction. Only the extracted fields are stored, locally, in `receipts.db`.
 - The app is designed for **one user on their own computer**. Do not deploy it publicly as-is: every visitor would share the same database and your API key.
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check .
+pytest
+```
+
+The tests cover parsing, validation, VAT rules, duplicates, currency conversion, storage and the Excel report. They use a fake Claude client, so no API key is needed. The UI is tested headlessly with Streamlit's `AppTest`. GitHub Actions runs everything on every push.
 
 ## Tech stack
 
