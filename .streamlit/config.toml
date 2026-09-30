@@ -1,0 +1,20 @@
+[theme]
+base = "light"
+primaryColor = "#0E7490"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F6"
+textColor = "#111827"
+
+[server]
+# Only this computer can open the app. Without this, anyone on the same Wi-Fi could
+# open it, see the saved receipts and spend the API credit.
+address = "localhost"
+# Receipts are small; a low limit also caps what one upload can cost.
+maxUploadSize = 20
+
+[client]
+# Hide Python tracebacks (file paths, internals) from the browser.
+showErrorDetails = false
+
+[browser]
+gatherUsageStats = false

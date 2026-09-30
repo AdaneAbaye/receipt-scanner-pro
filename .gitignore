@@ -48,3 +48,15 @@ tmp/
 # SQLite database (local persistence)
 receipts.db
 
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+
+# Financial data that must never reach GitHub
+*.db
+*.sqlite
+*.sqlite3
+*.xlsx
+*.csv
+secrets.toml

@@ -1,121 +1,36 @@
-# Security Best Practices
+# Security and privacy
 
-## 🔐 API Key Security
+## API key
 
-### Local Development
+The Anthropic API key is read **only** from Streamlit secrets. It is never typed into the UI and never hardcoded.
 
-**Required:** Create `.streamlit/secrets.toml` file:
+- Local: put it in `.streamlit/secrets.toml` (gitignored):
+  ```toml
+  ANTHROPIC_API_KEY = "your-api-key"
+  ```
+- Streamlit Community Cloud: add it under the app's **Settings → Secrets**.
 
-```toml
-# .streamlit/secrets.toml
-ANTHROPIC_API_KEY = "your-actual-api-key-here"
+If a key is ever exposed, revoke it at [console.anthropic.com](https://console.anthropic.com/) and create a new one.
+
+## Where your data goes
+
+```
+Upload (memory) → Anthropic API (extraction) → validated fields → SQLite (receipts.db) → screen / Excel
 ```
 
-**Security Checklist:**
-- ✅ `.streamlit/secrets.toml` is already in `.gitignore`
-- ✅ Never commit API keys to version control
-- ✅ Never share API keys publicly
-- ✅ Rotate keys regularly
-- ✅ Use separate keys for development and production
+- **Receipt images and PDFs** are held in memory only and are never written to disk by the app. To extract the data, they are **sent to the Anthropic API**. Anthropic's commercial terms and data retention apply.
+- **Extracted fields** are stored in a local SQLite file, `receipts.db`, which is gitignored. They are the vendor, date, amounts, VAT, currency, business ID, document type and number, and approval status. Set `RECEIPTS_DB_PATH` to keep it somewhere else.
+- **Exchange rates** are public data from exchangerate-api.com. No personal data is sent to that service.
 
-### Production Deployment (Streamlit Cloud)
+## Single-user design
 
-1. Go to your app dashboard on Streamlit Cloud
-2. Click on "⚙️ Settings"
-3. Navigate to "Secrets" section
-4. Add your secret:
-   ```toml
-   ANTHROPIC_API_KEY = "your-production-api-key"
-   ```
-5. Save and restart the app
+The app has **no login**, and everyone who opens it shares one database and your API key. Run it on your own computer, or behind authentication. Do not publish it on the open internet as is.
 
-## 🛡️ Data Security
+## Safeguards in the code
 
-### File Handling
-- ✅ **Receipt images and PDFs are processed strictly in-memory** using `BytesIO`
-- ✅ **Original receipt files are never saved to disk**
-- ✅ **Uploaded files exist only in memory during analysis** and are discarded after processing
-
-### Extracted Metadata Storage
-- Extracted metadata (Vendor, Date, Amount, VAT, Currency, etc.) is stored in a **local SQLite database** (`receipts.db`) for persistence
-- This allows the app to retain receipt data across sessions without storing the original images
-- The database file is in the project directory and is listed in `.gitignore` to avoid accidental commits
-
-### Data Flow
-```
-User Upload → Memory (BytesIO) → Claude API → JSON Response → SQLite (receipts.db) → Charts
-```
-
-**Original receipt images/PDFs:**
-- Processed in-memory only
-- Never saved to disk
-- Discarded after extraction completes
-
-**Extracted metadata:**
-- Stored locally in `receipts.db`
-- Persists across sessions until user clears data
-
-## 🔒 Privacy
-
-### What is Processed
-- Receipt images (temporary, in-memory only—never written to disk)
-- Extracted text data (vendor, date, amount, VAT)
-- Currency conversion rates (public data)
-
-### What is Stored Locally
-- Extracted metadata only (vendor name, date, amount, VAT, currency, etc.) in `receipts.db`
-
-### What is NOT Stored
-- Original receipt images or PDF files
-- User personal information
-- Payment card details
-
-## 🚨 Security Warnings
-
-**DO NOT:**
-- ❌ Commit `.streamlit/secrets.toml` to Git
-- ❌ Share your API key in screenshots
-- ❌ Use production keys in development
-- ❌ Store sensitive data in the app
-
-**DO:**
-- ✅ Use secrets management for API keys
-- ✅ Review `.gitignore` before commits
-- ✅ Rotate API keys regularly
-- ✅ Monitor API usage for anomalies
-
-## 📋 Audit Trail
-
-The app includes:
-- ✅ SHA-256 duplicate detection (prevents re-processing of identical receipts)
-- ✅ Business ID validation (ensures data quality)
-- ✅ Error handling and logging
-- ✅ Thread-safe SQLite persistence for concurrent processing
-
-## 🔄 Updates
-
-To update your API key:
-
-**Local:**
-1. Edit `.streamlit/secrets.toml`
-2. Restart Streamlit app
-
-**Production:**
-1. Update secrets in Streamlit Cloud dashboard
-2. App automatically restarts
-
-## ⚠️ Incident Response
-
-If you suspect your API key is compromised:
-
-1. **Immediately revoke** the key at [console.anthropic.com](https://console.anthropic.com/)
-2. **Generate** a new API key
-3. **Update** your secrets file
-4. **Monitor** API usage for unauthorized requests
-5. **Review** recent activity logs
-
----
-
-**Last Updated:** January 2026  
-**Version:** 1.0
-
+- **Duplicate detection**: an exact re-upload is detected by a SHA-256 hash of the file, before any API call. The same document from another photo is detected by its vendor, date, amount, currency and document number.
+- **Validation**: the model's output is validated with Pydantic before it is stored. Every query uses SQL parameters.
+- **Untrusted AI output**: everything the model returns is HTML-escaped before it is shown in the UI.
+- **Spreadsheet formula injection**: text from receipts and file names is written to Excel as plain text (`strings_to_formulas` is off), so `=HYPERLINK(...)` in a vendor name stays harmless text.
+- **Local only**: `.streamlit/config.toml` binds the server to `localhost`, caps uploads at 20 MB and hides Python error details from the browser. API errors are logged; the screen shows a short message only.
+- **Prompt injection**: the extraction prompt tells the model to treat the document as data, not instructions. You still review every document before it goes into the report.
