@@ -125,6 +125,7 @@ DOC_TYPE_LABELS = {
     "tax_invoice": "חשבונית מס",
     "tax_invoice_receipt": "חשבונית מס קבלה",
     "credit_note": "חשבונית זיכוי",
+    "bill": "חשבון",
 }
 CHART_COLORS = ["#0E7490", "#1D4ED8", "#B45309", "#BE185D", "#15803D", "#6D28D9", "#64748B"]
 
@@ -145,6 +146,8 @@ st.markdown(f"""
     /* Header + stepper */
     .rs-header {{display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px;}}
     .rs-brand {{display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 700;}}
+    .rs-brand-text {{display: flex; flex-direction: column; gap: 2px;}}
+    .rs-tagline {{font-size: 13px; font-weight: 400; color: #6B7280;}}
     .rs-logo {{width: 38px; height: 38px; border-radius: 10px; background: {ACCENT}; display: flex; align-items: center; justify-content: center;}}
     .rs-steps {{margin: 0; padding: 0; list-style: none; display: flex; align-items: center; gap: 10px; font-size: 14px;}}
     .rs-step {{display: flex; align-items: center; gap: 6px; color: #6B7280;}}
@@ -203,6 +206,21 @@ st.markdown(f"""
     .rs-kpi.hl .v {{color: #FFFFFF;}}
     .rs-empty {{padding: 18px 20px; border-radius: 14px; background: #F9FAFB; color: #4B5563; font-size: 15px;}}
     .rs-muted {{font-size: 12.5px; color: #6B7280;}}
+
+    /* Phones: most receipts are photographed and reviewed on mobile */
+    @media (max-width: 640px) {{
+        .block-container {{padding: 1rem 1rem 2rem;}}
+        .rs-header {{flex-direction: column; align-items: flex-start; gap: 12px;}}
+        .rs-steps {{gap: 6px; font-size: 12.5px;}}
+        .rs-line {{width: 12px;}}
+        .rs-title {{font-size: 22px;}}
+        .rs-fields {{grid-template-columns: minmax(0, 1fr);}}
+        .rs-kpis {{grid-template-columns: repeat(2, minmax(0, 1fr));}}
+        .rs-kpi .v {{font-size: 22px;}}
+        .rs-queue {{overflow-x: auto;}}
+        .rs-q {{flex: 0 0 118px;}}
+        .st-key-rs_stage {{min-height: 0; padding: 16px;}}
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -228,8 +246,8 @@ def _receipt_key(r: dict) -> str:
 
 
 def render_header(step: int) -> None:
-    """Brand + 4-step progress: upload → AI extraction → review → export."""
-    labels = ["העלאה", "חילוץ AI", "בדיקה", "ייצוא"]
+    """Brand + 4-step progress: upload → AI extraction → review → report for the accountant."""
+    labels = ["העלאה", "חילוץ AI", "בדיקה", 'דוח לרו"ח']
     parts = []
     for i, label in enumerate(labels, start=1):
         if i < step:
@@ -248,7 +266,7 @@ def render_header(step: int) -> None:
             <div class="rs-logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"></path>
               <path d="M9 7h6"></path><path d="M9 11h6"></path><path d="M9 15h4"></path></svg></div>
-            <span>Receipt Scanner Pro</span>
+            <div class="rs-brand-text"><span>Receipt Scanner Pro</span><span class="rs-tagline">מצלמים קבלה, מאשרים, והדוח מוכן לרואה החשבון</span></div>
           </div>
           <ol class="rs-steps">{''.join(parts)}</ol>
         </div>
@@ -382,14 +400,14 @@ def render_summary(receipt_data: list, exchange_rates: dict) -> None:
     total_vat = float(sum(vat_ils))
     avg_receipt = total_ils / total_receipts if total_receipts else 0
 
-    st.markdown('<div class="rs-section">סיכום</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rs-section">הדוח לרואה החשבון</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="rs-kpis">
-          <div class="rs-kpi hl"><span class="k">מע"מ לקיזוז</span><span class="v">₪{total_vat:,.2f}</span></div>
+          <div class="rs-kpi hl"><span class="k">מע"מ ששולם</span><span class="v">₪{total_vat:,.2f}</span></div>
           <div class="rs-kpi"><span class="k">סה"כ הוצאות</span><span class="v">₪{total_ils:,.2f}</span></div>
-          <div class="rs-kpi"><span class="k">קבלות</span><span class="v">{total_receipts}</span></div>
-          <div class="rs-kpi"><span class="k">ממוצע לקבלה</span><span class="v">₪{avg_receipt:,.2f}</span></div>
+          <div class="rs-kpi"><span class="k">מסמכים</span><span class="v">{total_receipts}</span></div>
+          <div class="rs-kpi"><span class="k">ממוצע למסמך</span><span class="v">₪{avg_receipt:,.2f}</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -402,9 +420,9 @@ def render_summary(receipt_data: list, exchange_rates: dict) -> None:
     with c1:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         st.download_button(
-            label="הורדת דוח Excel",
+            label='הורדת הדוח לרו"ח (Excel)',
             data=create_excel_download(df),
-            file_name=f"receipt_analysis_{timestamp}.xlsx",
+            file_name=f"receipts_for_accountant_{timestamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width='stretch',
         )
@@ -494,10 +512,10 @@ def main():
     render_header(step)
 
     uploaded_files = st.file_uploader(
-        "גררו לכאן קבלות (JPG, PNG, PDF)",
+        "צלמו או העלו קבלות וחשבוניות (JPG, PNG, PDF)",
         type=['jpg', 'jpeg', 'png', 'pdf'],
         accept_multiple_files=True,
-        help="אפשר להעלות כמה קבלות בבת אחת",
+        help="בנייד אפשר לצלם ישירות מהמצלמה. אפשר להעלות כמה מסמכים בבת אחת.",
         key=f"uploader_{st.session_state.uploader_key}",
     )
 
@@ -553,8 +571,8 @@ def main():
 
     if not receipt_data:
         st.markdown(
-            '<div class="rs-empty" style="margin-top:12px">העלו קבלות כדי להתחיל. '
-            'ה-AI יחלץ ספק, תאריך, סכום ומע"מ, ואתם תאשרו כל קבלה לפני הייצוא.</div>',
+            '<div class="rs-empty" style="margin-top:12px">צלמו את הקבלות והחשבוניות של העסק, מהנייד או מהמחשב. '
+            'ה-AI יחלץ ספק, תאריך, סכום ומע"מ, אתם מאשרים כל מסמך, ובסוף מורידים דוח Excel מסודר לרואה החשבון.</div>',
             unsafe_allow_html=True,
         )
         return
